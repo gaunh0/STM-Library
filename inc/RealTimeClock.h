@@ -5,12 +5,15 @@
 
 
 void MX_RTC_Init(void);
-void RealTime_Init(uint8_t year,uint8_t month,uint8_t date,uint8_t weekday,uint8_t hour,uint8_t minute,uint8_t second);
+void RealTime_Init(uint32_t k);
 uint8_t CheckLeapYear(uint16_t _year);
 uint32_t GetAndConvertToTimestamp(void);
-void RTC_TmeStampShow(void);
-void RTC_CalendarShow(void);
 
+void RTC_CalendarShow(void);
+void ConvertTimestampToDate(uint32_t k);
+void SaveDataToBKR(uint32_t BackupRegister,uint16_t data);
+uint16_t GetDataFromBKR(uint32_t BackupRegister);
+void RealTime_Init1(void);
 
 #endif
 
