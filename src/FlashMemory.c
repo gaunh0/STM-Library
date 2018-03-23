@@ -1,155 +1,272 @@
+/**
+  ******************************************************************************
+  * @file    FlashMemory.c
+  * @author  Combros
+  * @version 1.0
+  * @date    10/18/2017 4:26:14 PM
+  * @brief   $brief$     
+  ******************************************************************************
+  */
+	
+/* Includes ------------------------------------------------------------------*/
 #include "FlashMemory.h"
+#include <string.h>
 
-#define PAGE_START			44
-#define CARD_DATA_SIZE		8
-uint8_t BufferTemp[FLASH_PAGE_SIZE];
+/* Private typedef -----------------------------------------------------------*/
+/* Private define ------------------------------------------------------------*/
+/* Private macros ------------------------------------------------------------*/
+/* Private variables ---------------------------------------------------------*/
+uint8_t FlashBufferTemp[100];
+uint8_t	Flash_Buffer_Temp[FLASH_PAGE_SIZE+1];
 
-FLASHStatus SaveCardDataToFlash(CombrosCardData Data){
-	/*Variable used for Erase procedure*/
-	FLASH_EraseInitTypeDef EraseInitStruct;
-	
-	uint32_t Address = 0, PAGEError = 0;
-	uint32_t DataTemp = 0;	
-	uint16_t PageIndex = 0;
-	uint32_t PageDataAddress = 0;	
-	uint8_t *ptBufferTemp;
-	FLASHStatus MemoryProgramStatus = PASSED;
+/* Private function prototypes -----------------------------------------------*/
+/* Exported functions --------------------------------------------------------*/
+void FLASH_Init()
+{
+  /* Unlock the Program memory */
+  HAL_FLASH_Unlock();
 
-	/* Unlock the Flash to enable the flash control register access *************/
-	HAL_FLASH_Unlock();
-	PageIndex = PAGE_START + (Data.UserIndex /CARD_DATA_SIZE) ;
-	PageDataAddress = (uint32_t)ADDR_FLASH_PAGE_0 +(FLASH_PAGE_SIZE*(PageIndex-1));
-	// Read data from FLASH to buffer Temp
-	
-//	printf("\r\n PageIndex: %x ",PageIndex);
-	Address = PageDataAddress;
-//	printf("\r\n Address: %x ",Address);
+  /* Clear all FLASH flags */
+  __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_PGERR | FLASH_FLAG_WRPERR);
+  /* Unlock the Program memory */
+  HAL_FLASH_Lock();
+}
 
-	ptBufferTemp = BufferTemp;
-	while (Address < (PageDataAddress + FLASH_PAGE_SIZE)){
-		DataTemp = *(__IO uint32_t*)Address;		
-		*ptBufferTemp =  (DataTemp>>24) &0xFF;
-		*ptBufferTemp++ =  (DataTemp>>16) &0xFF;
-		*ptBufferTemp++ =  (DataTemp>>8) &0xFF;
-		*ptBufferTemp++ =  DataTemp &0xFF;
-		Address +=4;
-		*ptBufferTemp +=4;
-	}
-	/*for (i = 0;i<1024;i++){
-		printf("%x",BufferTemp[i]);		
-	}*/
-	
-	// Add new data to Buffer
-	uint16_t index_temp;
-	
-		// CARD_DATA_SIZE = 8
-		// PAGE_SIZE = 1024
-		// =>  have 128 blocks data in one page
-	index_temp = (Data.UserIndex%128)*CARD_DATA_SIZE;
-	printf("\r\n index_temp: %x ",index_temp);
-	BufferTemp[index_temp++] = Data.TagID[0];
-	BufferTemp[index_temp++] = Data.TagID[1];
-	BufferTemp[index_temp++] = Data.TagID[2];
-	BufferTemp[index_temp++] = Data.TagID[3];
+uint8_t FLASH_WriteBuffer(uint32_t Addr, uint8_t* pBuffer, uint16_t Length)
+{
+  uint8_t ret_val = 0;
+  uint32_t AddressTemp;
+  uint32_t DataTemp;
+  uint8_t DataBuffer[4];
+  uint16_t Index = 0;
 
-	BufferTemp[index_temp++] = Data.UserActiveFlag;
-	BufferTemp[index_temp++] = Data.UserPriority;	
-	BufferTemp[index_temp++] = Data.UserIndex>>8;
-	BufferTemp[index_temp++] = Data.UserIndex;
+  AddressTemp = Addr;
+  
+  HAL_FLASH_Unlock();
+  while (Index < Length)
+  {
+    for ( uint8_t i = 0; i < 4; i++ )
+    {
+      if (Index < Length)
+      {
+        DataBuffer[i] = pBuffer[Index++];
+      }
+      else
+      {
+        DataBuffer[i] = 0xFF;
+      }
+    }
 
-//	printf("\r\n PageIndex: %d ",PageIndex);
-//	printf("\r\n PageAdd: %x ",Address);
+    DataTemp = DataBuffer[3];
+    DataTemp = DataTemp<<8;
+    DataTemp |= DataBuffer[2];
+    DataTemp = DataTemp<<8;
+    DataTemp |= DataBuffer[1];
+    DataTemp = DataTemp<<8;
+    DataTemp |= DataBuffer[0];
+    
+    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, AddressTemp, DataTemp) == HAL_OK)
+    {
+      AddressTemp = AddressTemp + 4;
+    }
+    else
+    {
+      return ret_val;
+    }
+    DataTemp = 0; 
+  }
+ 
+  HAL_FLASH_Lock();
+  return 1;
+}
 
+uint8_t FLASH_WriteData(uint32_t Addr, uint8_t* pData, uint16_t Length)
+{
+  uint8_t   ret_val = 0;
+  uint32_t  AddressTemp;
+  uint32_t  DataTemp;
+  uint8_t   DataBuffer[4];
+  uint16_t  DataLength;
+  uint16_t  Index = 0;
 
-	/* Erase the FLASH pages */	
-	/* Fill EraseInit structure*/
-	EraseInitStruct.TypeErase    	= FLASH_TYPEERASE_PAGES;
-	EraseInitStruct.PageAddress = PageDataAddress;
-	EraseInitStruct.NbPages     	= 1;
+  AddressTemp = Addr;
+  DataLength  = strlen(pData);
+  
+  HAL_FLASH_Unlock();
+  while (Index < Length)
+  {
+    for ( uint8_t i = 0; i < 4; i++ )
+    {
+      if (Index < Length)
+      {
+        if (Index < DataLength)
+        {
+          DataBuffer[i] = pData[Index];
+        }
+        else
+        {
+          DataBuffer[i] = 0x00;
+        }
+      }
+      else
+      {
+        DataBuffer[i] = 0xFF;
+      }
+      Index++;
+    }
 
-	if (HAL_FLASHEx_Erase(&EraseInitStruct, &PAGEError) != HAL_OK){
-		printf("Flash Erase Error Code = %d",HAL_FLASH_GetError());
-		MemoryProgramStatus = FAILED;
-		return MemoryProgramStatus;
-	}
-	
-	/* Program Flash Page */
-	Address = PageDataAddress;	
-	ptBufferTemp = BufferTemp;
-	uint8_t ProgramRetry = 0;
-	while (Address < (PageDataAddress + FLASH_PAGE_SIZE)){
-		DataTemp = *ptBufferTemp<<24;
-		DataTemp = DataTemp | ((*ptBufferTemp+1)<<16);
-		DataTemp = DataTemp | ((*ptBufferTemp+2)<<8);
-		DataTemp = DataTemp | (*ptBufferTemp+3);
-		if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, Address, DataTemp) == HAL_OK){
-			Address +=4;	
-			ptBufferTemp +=4;
-			ProgramRetry = 0;
-		}
-		else {
-			ProgramRetry ++;
-			if (ProgramRetry>2){
-				MemoryProgramStatus = FAILED;
-				return MemoryProgramStatus;
-			}
-		}
-		DataTemp = 0;			
+    DataTemp = DataBuffer[3];
+    DataTemp = DataTemp<<8;
+    DataTemp |= DataBuffer[2];
+    DataTemp = DataTemp<<8;
+    DataTemp |= DataBuffer[1];
+    DataTemp = DataTemp<<8;
+    DataTemp |= DataBuffer[0];
+    
+    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, AddressTemp, DataTemp) == HAL_OK)
+    {
+      AddressTemp = AddressTemp + 4;
+    }
+    else
+    {
+      return ret_val;
+    }
+    DataTemp = 0; 
+  }
+ 
+  HAL_FLASH_Lock();
+  return 1;
+
+}
+
+uint8_t* FLASH_ReadFromAddr(uint32_t Addr, uint8_t* pData, uint16_t Length)
+{ 
+	uint32_t Address = 0;	
+	uint32_t datatemp = 0;
+	Address = Addr;
+  uint8_t word[4];
+  
+	for (uint16_t i = 0; i < Length; i = i + 4)
+  {
+		datatemp = *(__IO uint32_t*)Address;
+
+    word[0] = datatemp & 0xFF;
+    *(pData + i) = word[0];
+
+    word[1] = (datatemp>>8) & 0xFF;
+    *(pData + i + 1) = word[1];
+
+    word[2] = (datatemp>>16) & 0xFF;
+    *(pData + i + 2) = word[2];
+    
+		word[3] = (datatemp>>24) & 0xFF;
+    *(pData + i + 3) = word[3];
+
+		Address += 4;
+
+    //HAL_UART_Transmit(&UartDebug, word, 4, 10);
 	}	
-	return MemoryProgramStatus;
+	//printf("\r\n");
+  return pData;
 }
 
-FLASHStatus ReadCardDataFromFlash(CombrosCardData* cData, uint16_t CardIndex){	
-	uint8_t PageIndex = 0;
-	uint32_t Address = 0;	
-	uint32_t datatemp = 0;
+uint32_t FLASH_EraseFrom(uint32_t start, uint8_t num_page)
+{
+	uint32_t PageError = 0;
+	FLASH_EraseInitTypeDef pEraseInit;
+	HAL_StatusTypeDef status = HAL_OK;
 
-	PageIndex = (CardIndex /CARD_DATA_SIZE) + PAGE_START;
-//	printf("\r\n PageIndex: %x ",PageIndex);
-	Address = (uint32_t)ADDR_FLASH_PAGE_0 + (FLASH_PAGE_SIZE*(PageIndex-1)) + (CardIndex%128)*CARD_DATA_SIZE;
-//	printf("\r\n Address: %x ",Address);
-	// Read TAG_ID from FLASH
-	
-	datatemp = *(__IO uint32_t*)Address;
-	cData->TagID[0] =  (datatemp>>24) &0xFF;
-	cData->TagID[1] =  (datatemp>>16) &0xFF;
-	cData->TagID[2] =  (datatemp>>8) &0xFF;
-	cData->TagID[3] =  datatemp & 0xFF;
-	datatemp = *(__IO uint32_t*)(Address+4);
-	cData->UserActiveFlag =  (datatemp>>24) &0xFF;
-	cData->UserPriority =  (datatemp>>16) &0xFF;	
-	cData->UserIndex =  datatemp & 0xFFFF;
-}
+	/* Unlock the Flash to enable the flash control register access *************/ 
+	HAL_FLASH_Unlock();
 
+	/* Get the sector where start the user flash area */
 
-uint8_t CheckTagIDFromFlash(CombrosCardData Data){	
-	uint32_t Address = 0;	
-	uint32_t datatemp = 0;
-	uint8_t PageIndex = 0;
-	uint8_t CardIDTemp[4];
-	if (Data.UserIndex > 2000){
-		printf("Do not exist User \r\n");
+	pEraseInit.TypeErase = FLASH_TYPEERASE_PAGES;
+	pEraseInit.PageAddress = start;
+	pEraseInit.Banks = FLASH_BANK_1;
+	pEraseInit.NbPages = num_page;
+	status = HAL_FLASHEx_Erase(&pEraseInit, &PageError);
+
+	/* Lock the Flash to disable the flash control register access (recommended
+	 to protect the FLASH memory against possible unwanted operation) *********/
+	HAL_FLASH_Lock();
+
+	if (status != HAL_OK){
+		/* Error occurred while page erase */
 		return 0;
 	}
-	else {
 
-		// CARD_DATA_SIZE = 8
-		// PAGE_SIZE = 1024
-		// =>  have 128 blocks data in one page
-		PageIndex = (Data.UserIndex /128) + PAGE_START;
-		Address = (uint32_t)ADDR_FLASH_PAGE_0 + (FLASH_PAGE_SIZE*(PageIndex-1)) + (Data.UserIndex%128)*CARD_DATA_SIZE;	
-		printf("\r\n Address: %x ",Address);
-		// Read TAG_ID from FLASH
-		datatemp = *(__IO uint32_t*)Address;
-		CardIDTemp[0] =  (datatemp>>24) &0xFF;
-		CardIDTemp[1] =  (datatemp>>16) &0xFF;
-		CardIDTemp[2] =  (datatemp>>8) &0xFF;
-		CardIDTemp[3] =  datatemp &0xFF;
+  return 1;
 
-		if (memcmp(Data.TagID,CardIDTemp,4) == 0) {
-			return 1;
-		}
-		else return 0;
-	}	
 }
+
+uint8_t	FLASH_WriteReplace(uint32_t Addr, uint8_t* pData, uint16_t Length)
+{
+	uint32_t PageAddr;
+	uint16_t startIndex;
+	uint16_t dataLength;
+
+	PageAddr = Addr - (Addr % FLASH_PAGE_SIZE);
+	startIndex = Addr % FLASH_PAGE_SIZE;
+	dataLength = strlen(pData);
+	
+//	printf("Write replace at PageAddr: 0x0%X | start at index: %d\r\n", PageAddr, startIndex);
+	FLASH_ReadFromAddr(PageAddr, Flash_Buffer_Temp, FLASH_PAGE_SIZE);
+
+	for (uint16_t i = 0; i < Length; i++)
+	{
+		if (i < dataLength)
+		{
+			Flash_Buffer_Temp[startIndex + i] = *(pData++);
+		}
+		else
+		{
+			Flash_Buffer_Temp[startIndex + i] = 0x00;
+		}
+	}
+	FLASH_EraseFrom(PageAddr, 1);
+	FLASH_WriteBuffer(PageAddr, Flash_Buffer_Temp, FLASH_PAGE_SIZE);
+	
+	return 0;
+}
+
+void FLASH_WriteBKUP(uint32_t BackupRegister, uint32_t Data)
+{
+  uint32_t tmp = 0U;
+
+  /* Check the parameters */
+  assert_param(IS_RTC_BKP(BackupRegister));
+  
+  tmp = (uint32_t)BKP_BASE; 
+  tmp += (BackupRegister * 4U);
+
+  *(__IO uint32_t *) tmp = (Data & BKP_DR1_D);
+}
+
+/**
+  * @brief  Reads data from the specified RTC Backup data Register.
+  * @param  hrtc: pointer to a RTC_HandleTypeDef structure that contains
+  *                the configuration information for RTC. 
+  * @param  BackupRegister: RTC Backup data Register number.
+  *          This parameter can be: RTC_BKP_DRx where x can be from 1 to 10 (or 42) to 
+  *                                 specify the register (depending devices).
+  * @retval Read value
+  */
+uint32_t FLASH_ReadBKUP(uint32_t BackupRegister)
+{
+  uint32_t backupregister = 0U;
+  uint32_t pvalue = 0U;
+
+  /* Check the parameters */
+  assert_param(IS_RTC_BKP(BackupRegister));
+
+  backupregister = (uint32_t)BKP_BASE; 
+  backupregister += (BackupRegister * 4U);
+  
+  pvalue = (*(__IO uint32_t *)(backupregister)) & BKP_DR1_D;
+
+  /* Read the specified register */
+  return pvalue;
+}
+
 
